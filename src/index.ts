@@ -895,7 +895,7 @@ async function runHttp(): Promise<void> {
       "GET  /mcp     — SSE event stream (requires mcp-session-id)\n" +
       "DELETE /mcp   — close a session\n" +
       "GET  /health  — health check\n\n" +
-      "See https://github.com/<you>/accor-mcp for usage.\n"
+      "See https://github.com/puneet-mehta/accor-mcp for usage.\n"
     );
   });
 

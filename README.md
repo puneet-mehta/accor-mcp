@@ -59,7 +59,7 @@ Best for: personal use with Claude Desktop, local development, no exposing the s
 ### Install & build
 
 ```bash
-git clone https://github.com/<you>/accor-mcp.git
+git clone https://github.com/puneet-mehta/accor-mcp.git
 cd accor-mcp
 npm install
 npm run build
@@ -155,13 +155,13 @@ For clients that **do** speak HTTP/SSE directly (Claude.ai web, custom integrati
 
 ### Railway (recommended — supports stateful sessions)
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/<you>/accor-mcp)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/puneet-mehta/accor-mcp)
 
 Railway picks up `railway.json` + `Dockerfile` automatically. After deploy, grab the public URL from the Railway dashboard and use it in your MCP client config.
 
 ### Render (free tier available)
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/<you>/accor-mcp)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/puneet-mehta/accor-mcp)
 
 Render reads `render.yaml` for service config. Free-tier instances cold-start after 15 min idle — fine for personal use, slow for first request.
 
