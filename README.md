@@ -155,9 +155,12 @@ For clients that **do** speak HTTP/SSE directly (Claude.ai web, custom integrati
 
 ### Railway (recommended — supports stateful sessions)
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/puneet-mehta/accor-mcp)
+1. Go to **[railway.com/new](https://railway.com/new)** → **Deploy from GitHub repo** → select `accor-mcp`
+2. Railway auto-detects `railway.json` + `Dockerfile` and deploys
+3. Once live, click **Settings → Networking → Generate Domain** to expose a public URL
+4. Use that URL in your MCP client config (e.g. `https://accor-mcp-production.up.railway.app/mcp`)
 
-Railway picks up `railway.json` + `Dockerfile` automatically. After deploy, grab the public URL from the Railway dashboard and use it in your MCP client config.
+> Railway's one-click deploy buttons only work for repos registered in their template marketplace. Until then, the manual flow above takes ~30 seconds.
 
 ### Render (free tier available)
 
