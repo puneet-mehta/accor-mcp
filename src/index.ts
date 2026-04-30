@@ -805,7 +805,11 @@ async function runStdio(): Promise<void> {
 
 async function runHttp(): Promise<void> {
   const port = parseInt(process.env.PORT ?? "3000", 10);
-  const host = process.env.HOST ?? "0.0.0.0";
+  // Bind to IPv4 wildcard by default. Some platforms (Railway, Fly.io) inject
+  // HOST="[::]" or "::" which Node accepts but their internal LBs can't always
+  // route to. Strip brackets and fall back to 0.0.0.0 if it's IPv6.
+  const rawHost = (process.env.HOST ?? "0.0.0.0").replace(/^\[|\]$/g, "");
+  const host = rawHost === "::" || rawHost === "" ? "0.0.0.0" : rawHost;
   const app = express();
 
   app.use(express.json({ limit: "4mb" }));

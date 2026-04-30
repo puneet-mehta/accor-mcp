@@ -24,7 +24,7 @@ COPY --from=build /app/build ./build
 
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://localhost:${PORT:-3000}/health || exit 1
+# Note: no Docker HEALTHCHECK — platforms (Railway/Render/Fly) run their own
+# external probes via /health, configured per-platform (railway.json, render.yaml).
 
 CMD ["node", "build/index.js"]
