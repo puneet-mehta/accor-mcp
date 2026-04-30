@@ -452,7 +452,6 @@ export interface HotelGqlDetails {
 const HOTEL_DETAILS_GQL_QUERY = `
 query HotelDetailsGql(
   $hotelId: ID!,
-  $hotelOffersHotelId: String!,
   $topAmenitiesLimit: PositiveInt,
   $reviewsLimit: PositiveInt!,
   $mediasLimit: PositiveInt,
@@ -460,9 +459,6 @@ query HotelDetailsGql(
   $mediaCategories: [MediaCategory!],
   $program: V2HotelPaymentMeansInput!,
   $descriptionMarkupLanguage: MarkupLanguage,
-  $legalNoticesContext: LegalNoticePageContext!,
-  $legalNoticesMantraPaymentEnabled: Boolean!,
-  $legalNoticesMarkupLanguage: MarkupLanguage!,
   $surfaceUnit: String,
   $babyDetails: Boolean
 ) {
@@ -563,9 +559,9 @@ interface HotelDetailsGqlResponse {
     presentationHints: { kickers: Array<{ code: string; label: string }> } | null;
     accommodations: AccommodationData[];
     v2facilities: {
-      breakfasts: Array<{ name: string; description: string | null }> | null;
-      fitnessCenters: Array<{ name: string; description: string | null }> | null;
-      pools: Array<{ name: string; description: string | null }> | null;
+      breakfasts: { name: string; description: string | null } | null;
+      fitnessCenters: { name: string; description: string | null } | null;
+      pools: { name: string; description: string | null } | null;
       restaurants: { items: Array<{ code: string; name: string; description: string | null }> } | null;
       bars: { items: Array<{ code: string; name: string; description: string | null }> } | null;
       spas: { items: Array<{ name: string; description: string | null }> } | null;
@@ -585,7 +581,6 @@ export async function getHotelDetailsGql(hotelId: string): Promise<HotelGqlDetai
     HOTEL_DETAILS_GQL_QUERY,
     {
       hotelId,
-      hotelOffersHotelId: hotelId,
       topAmenitiesLimit: 12,
       reviewsLimit: 6,
       mediasLimit: 6,
@@ -593,9 +588,6 @@ export async function getHotelDetailsGql(hotelId: string): Promise<HotelGqlDetai
       mediaCategories: MEDIA_CATEGORIES,
       program: "WEB",
       descriptionMarkupLanguage: "HTML",
-      legalNoticesContext: "HOTEL_DETAILS",
-      legalNoticesMantraPaymentEnabled: true,
-      legalNoticesMarkupLanguage: "HTML",
       surfaceUnit: "meters",
       babyDetails: false,
     },
@@ -620,8 +612,8 @@ export async function getHotelDetailsGql(hotelId: string): Promise<HotelGqlDetai
   const mediasList = h.medias?.items ?? [];
   const facilities = h.v2facilities;
 
-  const mapFacility = (xs: Array<{ name: string; description: string | null }> | null | undefined): HotelGqlFacilityItem[] =>
-    (xs ?? []).map((x) => ({ name: x.name, description: x.description }));
+  const mapFacility = (x: { name: string; description: string | null } | null | undefined): HotelGqlFacilityItem[] =>
+    x && x.name ? [{ name: x.name, description: x.description }] : [];
   const mapFacilityItems = (xs: { items: Array<{ code?: string; name: string; description: string | null }> } | null | undefined): HotelGqlFacilityItem[] =>
     (xs?.items ?? []).map((x) => ({ code: x.code, name: x.name, description: x.description }));
 

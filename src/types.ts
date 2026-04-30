@@ -10,6 +10,8 @@ export interface Hotel {
   labels: string[];
   isNewOpening: boolean;
   hasMemberRate: boolean;
+  acceptsPoints: boolean;        // loyaltyProgram.burnAllowed — "pay with points"
+  earnsPoints: boolean;          // loyaltyProgram.earnAllowed
   bookingUrl: string;
   apartmentRoomCodes?: string[];
 }
@@ -38,6 +40,8 @@ export interface HotelDetails {
   thematics: string[];
   isNewOpening: boolean;
   hasMemberRate: boolean;
+  acceptsPoints: boolean;
+  earnsPoints: boolean;
   bookingUrl: string;
 }
 

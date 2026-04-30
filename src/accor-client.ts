@@ -87,6 +87,9 @@ function mapHit(hit: AlgoliaHit): Hotel {
     address?: { street?: string; zipCode?: string; city?: string; country?: string; countryCode?: string };
     gps?: { lat?: string | number; lng?: string | number };
   } | undefined;
+  const lp = hit.loyaltyProgram as {
+    memberRate?: boolean; burnAllowed?: boolean; earnAllowed?: boolean;
+  } | undefined;
 
   return {
     id,
@@ -99,9 +102,9 @@ function mapHit(hit: AlgoliaHit): Hotel {
     ratingCount: rating?.nbReviews ?? null,
     labels: extractLabels(hit.labels),
     isNewOpening: Boolean(hit.isNewOpening),
-    hasMemberRate: Boolean(
-      (hit.loyaltyProgram as { memberRate?: boolean } | undefined)?.memberRate
-    ),
+    hasMemberRate: Boolean(lp?.memberRate),
+    acceptsPoints: Boolean(lp?.burnAllowed),
+    earnsPoints: Boolean(lp?.earnAllowed),
     bookingUrl: hotelUrl(id),
   };
 }
@@ -165,6 +168,12 @@ function mapHitToDetails(hit: AlgoliaHit): HotelDetails {
     isNewOpening: Boolean(hit.isNewOpening),
     hasMemberRate: Boolean(
       (hit.loyaltyProgram as { memberRate?: boolean } | undefined)?.memberRate
+    ),
+    acceptsPoints: Boolean(
+      (hit.loyaltyProgram as { burnAllowed?: boolean } | undefined)?.burnAllowed
+    ),
+    earnsPoints: Boolean(
+      (hit.loyaltyProgram as { earnAllowed?: boolean } | undefined)?.earnAllowed
     ),
     bookingUrl: hotelUrl(id),
   };

@@ -39,7 +39,7 @@ server.registerTool(
   {
     title: "Search Accor Hotels",
     description:
-      "Search for Accor hotels by destination. Returns a list of hotels with ratings, brand, star category, and booking URLs. Optionally filter by brand or star rating. Provide check-in/check-out dates to get direct booking links with availability. Set has_apartment=true to surface only hotels that actually have apartment-classified rooms (verified via HotelPageCold) — the Accor brand filter alone misses many properties (e.g. Mercure / Pullman / Mövenpick) that include 1BR+ apartment units.",
+      "Search for Accor hotels by destination. Returns a list of hotels with ratings, brand, star category, ALL loyalty info (whether the property accepts full point redemptions / 'Pay with points' and whether it earns points), and booking URLs. Optionally filter by brand or star rating. Provide check-in/check-out dates to get direct booking links with availability. Set has_apartment=true to surface only hotels that actually have apartment-classified rooms (verified via HotelPageCold) — the Accor brand filter alone misses many properties (e.g. Mercure / Pullman / Mövenpick) that include 1BR+ apartment units.",
     inputSchema: z.object({
       destination: z
         .string()
@@ -151,6 +151,7 @@ function formatHotel(h: Hotel, i: number): string {
     : "";
   const badges = [
     h.hasMemberRate ? "🏅 Member rate" : "",
+    h.acceptsPoints ? "🎯 Pay with points" : "",
     h.isNewOpening ? "🆕 New opening" : "",
   ]
     .filter(Boolean)
@@ -178,7 +179,7 @@ server.registerTool(
   {
     title: "Get Accor Hotel Details",
     description:
-      "Get detailed information about a specific Accor hotel by its ID. Returns full address, GPS coordinates, star rating, guest score, free and paid amenities, description, and photo URLs. Hotel IDs come from search_hotels results. Optionally provide dates to get a direct booking link.",
+      "Get detailed information about a specific Accor hotel by its ID. Returns full address, GPS coordinates, star rating, guest score, free and paid amenities, description, photo URLs, and ALL loyalty programme info (whether the property accepts full 'Pay with points' redemptions and whether it earns points on stays). Hotel IDs come from search_hotels results. Optionally provide dates to get a direct booking link.",
     inputSchema: z.object({
       hotel_id: z
         .string()
@@ -257,6 +258,8 @@ function formatDetails(d: HotelDetails): string {
 
   const badges = [
     d.hasMemberRate ? "🏅 Member rate available" : "",
+    d.acceptsPoints ? "🎯 Pay with points (full redemption)" : "",
+    d.earnsPoints ? "💎 Earns ALL points" : "",
     d.isNewOpening ? "🆕 New opening" : "",
   ]
     .filter(Boolean)
@@ -554,7 +557,7 @@ server.registerTool(
   {
     title: "Get Rich Hotel Details (GraphQL BFF)",
     description:
-      "Fetch a deep, freshly-rendered detail payload for an Accor hotel via the BFF GraphQL API (HotelPageCold operation). Heavier than `get_hotel_details` (Algolia) but returns: brand description, GM welcome message, full advantages/USP list, top amenities, amenity categories, certifications (eco labels, etc.), loyalty programme participation, formatted check-in/out times, room-occupancy limits, accepted payment methods, presentation kickers/badges, marketing labels, full facilities catalog (breakfasts, fitness centres, pools, restaurants, bars, spas — each with name + description), connecting/family room availability, recent guest reviews (author, rating, title, text, trip type), media gallery (image URLs by category), AND the full accommodation/room catalog. Use this when you need rich descriptive content; use `get_hotel_details` for fast, lightweight lookups.",
+      "Fetch a deep, freshly-rendered detail payload for an Accor hotel via the BFF GraphQL API (HotelPageCold operation). Heavier than `get_hotel_details` (Algolia) but returns: brand description, GM welcome message, full advantages/USP list, top amenities, amenity categories, certifications (eco labels, etc.), ALL loyalty programme info (status + whether full 'Pay with points' redemptions are accepted), formatted check-in/out times, room-occupancy limits, accepted payment methods, presentation kickers/badges, marketing labels, full facilities catalog (breakfasts, fitness centres, pools, restaurants, bars, spas — each with name + description), connecting/family room availability, recent guest reviews (author, rating, title, text, trip type), media gallery (image URLs by category), AND the full accommodation/room catalog. Use this when you need rich descriptive content; use `get_hotel_details` for fast, lightweight lookups.",
     inputSchema: z.object({
       hotel_id: z.string().describe('Accor hotel ID (e.g. "9221", "A8V6", "B1P9")'),
     }),
@@ -643,7 +646,11 @@ function formatGqlDetails(d: HotelGqlDetails): string {
   }
 
   if (d.loyaltyProgram) {
-    lines.push("", `🎫 **Loyalty:** ${d.loyaltyProgram.status}${d.loyaltyProgram.burnAllowed ? " · points redemption allowed" : ""}`);
+    const lpBadges = [
+      d.loyaltyProgram.burnAllowed ? "🎯 Pay with points" : "",
+      `Status: ${d.loyaltyProgram.status}`,
+    ].filter(Boolean).join(" · ");
+    lines.push("", `🎫 **ALL Loyalty:** ${lpBadges}`);
   }
 
   if (d.roomOccupancy) {
