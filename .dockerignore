@@ -1,0 +1,16 @@
+node_modules/
+build/
+*.js.map
+.env
+.env.local
+.git
+.gitignore
+.claude
+.dockerignore
+Dockerfile
+README.md
+*.md
+test/
+*.test.ts
+.vscode
+.idea
