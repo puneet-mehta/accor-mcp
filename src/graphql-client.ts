@@ -207,9 +207,18 @@ query HotelPageHot(
         accommodation { code }
         pricing {
           currency
+          formattedTaxType
           main {
             formattedAmount amount
             simplifiedPolicies { cancellation { code label } }
+            taxesTotalAmount {
+              included { label breakdown }
+              excluded { label breakdown }
+            }
+            feesTotalAmount {
+              included { label breakdown }
+              excluded { label breakdown }
+            }
           }
           deduction { percent formattedAmount type }
           alternative { amount formattedAmount }
@@ -250,12 +259,39 @@ function mkVars(
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+// Charges (taxes or fees) on an offer. `amount` is parsed best-effort from
+// the formatted label (Accor doesn't expose a numeric field) so it may be null
+// for unusual locales. `breakdown` is the human-readable line items, e.g.
+// "of which Good and Service Tax 18% : 18.0% (per night/per product)".
+export interface ChargeSummary {
+  label: string;
+  amount: number | null;
+  breakdown: string[];
+}
+
+// Full pricing breakdown for a single offer. `taxType` is a one-line summary
+// from Accor like "Taxes and fees included." or "Taxes not included : ₹4,411.80."
+// `grandTotal` is the all-in price the guest actually pays
+// (= main amount + any *excluded* taxes & fees).
+export interface PricingBreakdown {
+  taxType: string | null;
+  taxesIncluded: ChargeSummary | null;
+  taxesExcluded: ChargeSummary | null;
+  feesIncluded: ChargeSummary | null;
+  feesExcluded: ChargeSummary | null;
+  grandTotal: number | null;
+  grandTotalFormatted: string | null;
+}
+
 export interface NightlyRate {
   date: string;
   dayOfWeek: string;
   available: boolean;
   roomOnlyPrice: number | null;
   roomOnlyFormatted: string | null;
+  roomOnlyAllInPrice: number | null;       // includes any taxes/fees not in displayed price
+  roomOnlyAllInFormatted: string | null;
+  taxNote: string | null;                   // e.g. "Taxes excluded : ₹367.65"
   memberSaving: string | null;
 }
 
@@ -269,6 +305,7 @@ export interface RateOption {
   cancellation: string;
   memberSaving: string | null;
   nonMemberTotal: number | null;
+  pricing: PricingBreakdown | null;
 }
 
 export interface HotelRatesSummary {
@@ -283,6 +320,7 @@ export interface HotelRatesSummary {
     max: number;
     avg: number;
     total: number;
+    allInTotal: number;          // sum of nightly all-in prices (= total + any excluded taxes/fees)
     availableNights: number;
     cheapestDay: string;
     mostExpensiveDay: string;
@@ -298,6 +336,9 @@ export interface ChunkResult {
   available: boolean;
   cheapestRoomOnlyTotal: number | null;
   cheapestRoomOnlyFormatted: string | null;
+  cheapestRoomOnlyAllInTotal: number | null;
+  cheapestRoomOnlyAllInFormatted: string | null;
+  pricing: PricingBreakdown | null;
   unavailabilityReason: string | null;
 }
 
@@ -307,6 +348,7 @@ export interface BookingStrategy {
   chunks: ChunkResult[];
   allBookable: boolean;
   totalIfAllBookable: number | null;
+  totalAllInIfAllBookable: number | null;
 }
 
 // ── Hotel accommodations (room catalog) ───────────────────────────────────────
@@ -699,10 +741,22 @@ function nightCount(checkin: string, checkout: string): number {
   );
 }
 
+interface ChargeDetailsData {
+  label: string | null;
+  breakdown: string[];
+}
+
 interface OfferData {
   pricing: {
     currency: string;
-    main: { formattedAmount: string; amount: number; simplifiedPolicies: { cancellation: { code: string; label: string } } };
+    formattedTaxType: string | null;
+    main: {
+      formattedAmount: string;
+      amount: number;
+      simplifiedPolicies: { cancellation: { code: string; label: string } };
+      taxesTotalAmount: { included: ChargeDetailsData | null; excluded: ChargeDetailsData | null } | null;
+      feesTotalAmount: { included: ChargeDetailsData | null; excluded: ChargeDetailsData | null } | null;
+    };
     deduction: Array<{ percent: number; formattedAmount: string; type: string }> | null;
     alternative: { amount: number; formattedAmount: string } | null;
   };
@@ -710,6 +764,75 @@ interface OfferData {
   lengthOfStay: { value: number; unit: string };
   rate: { id: string; label: string };
   accommodation: { code: string } | null;
+}
+
+// Pull the trailing numeric token out of a label like
+// "Taxes excluded : ₹4,411.80" or "Taxes included : €191.91". Best-effort: if
+// we can't confidently parse one (unusual locale, multiple numbers), return null.
+function parseAmountFromLabel(label: string | null | undefined): number | null {
+  if (!label) return null;
+  const matches = label.match(/[\d][\d,.\s]*[\d]|[\d]/g);
+  if (!matches || matches.length === 0) return null;
+  const last = matches[matches.length - 1].replace(/\s/g, "");
+  // Heuristic: en-style "1,234.56" — strip thousands commas; if no period,
+  // commas could still be thousands (e.g. "4,411") so strip them too.
+  const cleaned = last.includes(".") ? last.replace(/,/g, "") : last.replace(/[,]/g, "");
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+function toChargeSummary(c: ChargeDetailsData | null | undefined): ChargeSummary | null {
+  if (!c || !c.label) return null;
+  return {
+    label: c.label,
+    amount: parseAmountFromLabel(c.label),
+    breakdown: Array.isArray(c.breakdown) ? c.breakdown : [],
+  };
+}
+
+function formatCurrency(amount: number, sample: string, currency: string): string {
+  // Try to mirror the symbol/format Accor returns. Sample looks like "₹24,510.00"
+  // or "€1,643.05" — extract the leading non-digit prefix as the symbol.
+  const symbolMatch = sample.match(/^[^\d-]+/);
+  const symbol = symbolMatch ? symbolMatch[0] : `${currency} `;
+  const rounded = Math.round(amount * 100) / 100;
+  const hasDecimals = sample.includes(".");
+  const num = hasDecimals
+    ? rounded.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : Math.round(rounded).toLocaleString("en-US");
+  return `${symbol}${num}`;
+}
+
+function buildPricingBreakdown(offer: OfferData | null): PricingBreakdown | null {
+  if (!offer) return null;
+  const p = offer.pricing;
+  const taxesIncluded = toChargeSummary(p.main.taxesTotalAmount?.included);
+  const taxesExcluded = toChargeSummary(p.main.taxesTotalAmount?.excluded);
+  const feesIncluded = toChargeSummary(p.main.feesTotalAmount?.included);
+  const feesExcluded = toChargeSummary(p.main.feesTotalAmount?.excluded);
+
+  const excludedSum =
+    (taxesExcluded?.amount ?? 0) + (feesExcluded?.amount ?? 0);
+  const hasAnyExcluded =
+    taxesExcluded?.amount != null || feesExcluded?.amount != null;
+  const grandTotal = hasAnyExcluded ? p.main.amount + excludedSum : p.main.amount;
+  const grandTotalFormatted = hasAnyExcluded
+    ? formatCurrency(grandTotal, p.main.formattedAmount, p.currency)
+    : p.main.formattedAmount;
+
+  const allNull =
+    !p.formattedTaxType && !taxesIncluded && !taxesExcluded && !feesIncluded && !feesExcluded;
+  if (allNull) return null;
+
+  return {
+    taxType: p.formattedTaxType ?? null,
+    taxesIncluded,
+    taxesExcluded,
+    feesIncluded,
+    feesExcluded,
+    grandTotal,
+    grandTotalFormatted,
+  };
 }
 
 interface HotelOffersData {
@@ -791,6 +914,7 @@ async function fetchStrategy(
         const reasons = data.hotelOffers.availability.reasons ?? [];
         const best = bestRoomOnly(offers, accommodationCode);
         const isAvail = status === "AVAILABLE" && !!best;
+        const pricing = buildPricingBreakdown(best);
         return {
           dateIn: c.dateIn,
           dateOut: c.dateOut,
@@ -798,6 +922,9 @@ async function fetchStrategy(
           available: isAvail,
           cheapestRoomOnlyTotal: best?.pricing.main.amount ?? null,
           cheapestRoomOnlyFormatted: best?.pricing.main.formattedAmount ?? null,
+          cheapestRoomOnlyAllInTotal: pricing?.grandTotal ?? best?.pricing.main.amount ?? null,
+          cheapestRoomOnlyAllInFormatted: pricing?.grandTotalFormatted ?? best?.pricing.main.formattedAmount ?? null,
+          pricing,
           unavailabilityReason: !isAvail
             ? reasons.map((r) => r.label).join(" · ") || status
             : null,
@@ -810,6 +937,9 @@ async function fetchStrategy(
           available: false,
           cheapestRoomOnlyTotal: null,
           cheapestRoomOnlyFormatted: null,
+          cheapestRoomOnlyAllInTotal: null,
+          cheapestRoomOnlyAllInFormatted: null,
+          pricing: null,
           unavailabilityReason: err instanceof Error ? err.message : "fetch error",
         };
       }
@@ -820,10 +950,13 @@ async function fetchStrategy(
   const totalIfAllBookable = allBookable
     ? chunks.reduce((s, c) => s + (c.cheapestRoomOnlyTotal ?? 0), 0)
     : null;
+  const totalAllInIfAllBookable = allBookable
+    ? chunks.reduce((s, c) => s + (c.cheapestRoomOnlyAllInTotal ?? c.cheapestRoomOnlyTotal ?? 0), 0)
+    : null;
 
   const chunkPattern = chunkPlan.map((c) => c.nights).join("+") + " nights";
 
-  return { strategyLabel: label, chunkPattern, chunks, allBookable, totalIfAllBookable };
+  return { strategyLabel: label, chunkPattern, chunks, allBookable, totalIfAllBookable, totalAllInIfAllBookable };
 }
 
 export async function getHotelRates(opts: {
@@ -905,6 +1038,7 @@ export async function getHotelRates(opts: {
         cancellation: o.pricing.main.simplifiedPolicies.cancellation.label,
         memberSaving,
         nonMemberTotal: o.pricing.alternative?.amount ?? null,
+        pricing: buildPricingBreakdown(o),
       };
       if (!seen.has(key) || seen.get(key)!.totalAmount > total) seen.set(key, opt);
     }
@@ -919,17 +1053,30 @@ export async function getHotelRates(opts: {
     const d = new Date(date + "T00:00:00Z");
     const memberSaving =
       best?.pricing.deduction?.find((x) => x.type === "MEMBER_RATE")?.formattedAmount ?? null;
+    const breakdown = buildPricingBreakdown(best);
+    // Compact one-liner so we don't repeat the full breakdown for each night.
+    const taxNote =
+      breakdown?.taxesExcluded?.label ??
+      breakdown?.feesExcluded?.label ??
+      breakdown?.taxType ??
+      null;
     return {
       date,
       dayOfWeek: DAYS[d.getUTCDay()],
       available,
       roomOnlyPrice: best?.pricing.main.amount ?? null,
       roomOnlyFormatted: best?.pricing.main.formattedAmount ?? null,
+      roomOnlyAllInPrice: breakdown?.grandTotal ?? best?.pricing.main.amount ?? null,
+      roomOnlyAllInFormatted: breakdown?.grandTotalFormatted ?? best?.pricing.main.formattedAmount ?? null,
+      taxNote,
       memberSaving,
     };
   });
 
   const prices = nightly.filter((n) => n.roomOnlyPrice !== null).map((n) => n.roomOnlyPrice!);
+  const allInPrices = nightly
+    .filter((n) => n.roomOnlyAllInPrice !== null)
+    .map((n) => n.roomOnlyAllInPrice!);
   const roomOnlyStats =
     prices.length > 0
       ? {
@@ -937,6 +1084,9 @@ export async function getHotelRates(opts: {
           max: Math.max(...prices),
           avg: prices.reduce((a, b) => a + b, 0) / prices.length,
           total: prices.reduce((a, b) => a + b, 0),
+          allInTotal: allInPrices.length
+            ? allInPrices.reduce((a, b) => a + b, 0)
+            : prices.reduce((a, b) => a + b, 0),
           availableNights: prices.length,
           cheapestDay: nightly.find((n) => n.roomOnlyPrice === Math.min(...prices))!.date,
           mostExpensiveDay: nightly.find((n) => n.roomOnlyPrice === Math.max(...prices))!.date,

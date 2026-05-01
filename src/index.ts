@@ -467,19 +467,42 @@ function formatRates(s: HotelRatesSummary & { memberSummary: MemberSummary | nul
     lines.push(formatMemberSummary(s.memberSummary));
   }
 
+  // Single tax-treatment header so we don't repeat per-night.
+  // Example: "Taxes not included : ₹4,411.80." or "Taxes and fees included."
+  const taxHeader = s.fullStayOptions.find((o) => o.pricing?.taxType)?.pricing?.taxType
+    ?? s.nightly.find((n) => n.taxNote)?.taxNote
+    ?? null;
+  if (taxHeader) {
+    lines.push("");
+    lines.push(`💸 ${taxHeader}  (rates below show the displayed price; all-in totals add any excluded taxes/fees)`);
+  }
+
   lines.push("");
 
   // Day-by-day table
   if (s.nightly.length > 0) {
+    const anyAllIn = s.nightly.some(
+      (n) => n.roomOnlyAllInPrice !== null && n.roomOnlyAllInPrice !== n.roomOnlyPrice
+    );
     lines.push("📅 **Nightly room-only rates** (member rate, cheapest available)");
     lines.push("```");
-    lines.push("Date         Day   Price          Saving");
-    lines.push("─".repeat(48));
+    if (anyAllIn) {
+      lines.push("Date         Day   Price          All-in         Saving");
+      lines.push("─".repeat(60));
+    } else {
+      lines.push("Date         Day   Price          Saving");
+      lines.push("─".repeat(48));
+    }
     for (const n of s.nightly) {
       const weekend = n.dayOfWeek === "Fri" || n.dayOfWeek === "Sat" ? " ◀" : "";
       const price = n.roomOnlyFormatted ?? "  unavail";
       const saving = n.memberSaving ? `(save ${n.memberSaving})` : "";
-      lines.push(`${n.date}  ${n.dayOfWeek}   ${price.padStart(12)}  ${saving}${weekend}`);
+      if (anyAllIn) {
+        const allIn = n.roomOnlyAllInFormatted ?? "";
+        lines.push(`${n.date}  ${n.dayOfWeek}   ${price.padStart(12)}  ${allIn.padStart(12)}  ${saving}${weekend}`);
+      } else {
+        lines.push(`${n.date}  ${n.dayOfWeek}   ${price.padStart(12)}  ${saving}${weekend}`);
+      }
     }
     lines.push("```");
   }
@@ -494,7 +517,11 @@ function formatRates(s: HotelRatesSummary & { memberSummary: MemberSummary | nul
     lines.push(`  Most expensive: ${s.currency} ${st.max.toLocaleString()} on ${st.mostExpensiveDay}`);
     lines.push(`  Average/night: ${s.currency} ${Math.round(st.avg).toLocaleString()}`);
     lines.push(`  Variance: ${variance.toFixed(1)}%  (${variance < 25 ? "very stable" : variance < 50 ? "moderate swing" : "high swing"})`);
-    lines.push(`  Total: ${s.currency} ${Math.round(st.total).toLocaleString()}  (${st.availableNights}/${s.nights} nights priced)`);
+    lines.push(`  Total (displayed): ${s.currency} ${Math.round(st.total).toLocaleString()}  (${st.availableNights}/${s.nights} nights priced)`);
+    if (st.allInTotal !== st.total) {
+      const extra = st.allInTotal - st.total;
+      lines.push(`  Total (all-in):    ${s.currency} ${Math.round(st.allInTotal).toLocaleString()}  (+${s.currency} ${Math.round(extra).toLocaleString()} taxes/fees)`);
+    }
   } else {
     lines.push("");
     lines.push("⚠️  No room-only nightly rates available for this period.");
@@ -506,8 +533,28 @@ function formatRates(s: HotelRatesSummary & { memberSummary: MemberSummary | nul
     lines.push(`📦 **Full-stay package options** (${s.nights} nights)`);
     for (const o of s.fullStayOptions.slice(0, 8)) {
       lines.push(
-        `  • ${o.mealPlan} · ${o.cancellation}  →  ${o.totalFormatted} total  (${o.perNightFormatted}/night)`
+        `  • ${o.mealPlan} · ${o.cancellation}  →  ${o.totalFormatted} displayed  (${o.perNightFormatted}/night)`
       );
+      const allIn = o.pricing?.grandTotalFormatted;
+      const allInDiffers =
+        o.pricing?.grandTotal != null && o.pricing.grandTotal !== o.totalAmount;
+      if (allInDiffers && allIn) {
+        const extra = (o.pricing!.grandTotal! - o.totalAmount);
+        lines.push(`     💰 All-in: ${allIn}  (+${s.currency} ${Math.round(extra).toLocaleString()} excluded taxes/fees)`);
+      }
+      const taxLine = o.pricing?.taxesIncluded?.label ?? o.pricing?.taxesExcluded?.label;
+      if (taxLine) lines.push(`     🧾 ${taxLine}`);
+      const feeLine = o.pricing?.feesIncluded?.label ?? o.pricing?.feesExcluded?.label;
+      if (feeLine) lines.push(`     🧾 ${feeLine}`);
+      const breakdownLines = [
+        ...(o.pricing?.taxesIncluded?.breakdown ?? []),
+        ...(o.pricing?.taxesExcluded?.breakdown ?? []),
+        ...(o.pricing?.feesIncluded?.breakdown ?? []),
+        ...(o.pricing?.feesExcluded?.breakdown ?? []),
+      ];
+      for (const b of breakdownLines.slice(0, 5)) {
+        lines.push(`        - ${b}`);
+      }
       lines.push(`     ↳ ${o.rateLabel}${o.memberSaving ? ` · save ${o.memberSaving} as member` : ""}`);
     }
   }
@@ -516,17 +563,22 @@ function formatRates(s: HotelRatesSummary & { memberSummary: MemberSummary | nul
   if (s.bookingStrategies.length > 0) {
     lines.push("");
     lines.push("🗓️  **Booking strategies** — some hotels cap stay length, so we test multiple chunkings");
-    let cheapest: { label: string; total: number } | null = null;
+    let cheapest: { label: string; total: number; allIn: number | null } | null = null;
     for (const st of s.bookingStrategies) {
       const status = st.allBookable ? "✅" : "❌";
       const total = st.totalIfAllBookable !== null
         ? `${s.currency} ${Math.round(st.totalIfAllBookable).toLocaleString()}`
         : "n/a";
+      const allInSuffix =
+        st.totalAllInIfAllBookable !== null && st.totalAllInIfAllBookable !== st.totalIfAllBookable
+          ? `  (all-in ${s.currency} ${Math.round(st.totalAllInIfAllBookable).toLocaleString()})`
+          : "";
       const reservations = `${st.chunks.length} reservation${st.chunks.length !== 1 ? "s" : ""}`;
-      lines.push(`  ${status} ${st.strategyLabel} (${st.chunkPattern} · ${reservations}):  ${total}`);
+      lines.push(`  ${status} ${st.strategyLabel} (${st.chunkPattern} · ${reservations}):  ${total}${allInSuffix}`);
       if (st.allBookable && st.totalIfAllBookable !== null) {
-        if (!cheapest || st.totalIfAllBookable < cheapest.total) {
-          cheapest = { label: st.strategyLabel, total: st.totalIfAllBookable };
+        const compareTotal = st.totalAllInIfAllBookable ?? st.totalIfAllBookable;
+        if (!cheapest || compareTotal < (cheapest.allIn ?? cheapest.total)) {
+          cheapest = { label: st.strategyLabel, total: st.totalIfAllBookable, allIn: st.totalAllInIfAllBookable };
         }
       }
       // Show per-chunk detail if any chunk failed (so user knows where the gap is)
@@ -540,7 +592,10 @@ function formatRates(s: HotelRatesSummary & { memberSummary: MemberSummary | nul
     }
     if (cheapest) {
       lines.push("");
-      lines.push(`  💡 Cheapest fully-bookable strategy: **${cheapest.label}** at ${s.currency} ${Math.round(cheapest.total).toLocaleString()}`);
+      const allInBit = cheapest.allIn !== null && cheapest.allIn !== cheapest.total
+        ? ` (all-in ${s.currency} ${Math.round(cheapest.allIn).toLocaleString()})`
+        : "";
+      lines.push(`  💡 Cheapest fully-bookable strategy: **${cheapest.label}** at ${s.currency} ${Math.round(cheapest.total).toLocaleString()}${allInBit}`);
     } else {
       lines.push("");
       lines.push(`  ⚠️  No booking strategy is fully bookable — the property may have availability gaps`);
